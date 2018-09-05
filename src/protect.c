@@ -134,6 +134,17 @@ void dump_read(pid_t pid, long syscall, long len) {
     close(fd);
 }
 
+void dump_other(pid_t pid, long syscall) {
+    char tmp[128];
+    int fd;
+    sprintf(tmp, "%s-syscall", cap_file);
+    fd = open(tmp, O_WRONLY|O_CREAT|O_APPEND, 0666);
+    sprintf(temp_buf, "%s()\n", syscallent[syscall].sys_name); 
+    write(fd, temp_buf, strlen(temp_buf));
+    close(fd);
+}
+
+
 /*
  * len = read(fd, buf, len);
  */
@@ -205,11 +216,14 @@ void dump_open(pid_t pid, long syscall) {
     sprintf(temp_buf, "open(%s)\n", protect_buf);
     write(fd, temp_buf, strlen(temp_buf));
     close(fd);
-    if(!strstr(protect_buf, "/lib") && !strstr(protect_buf, "/etc") && !strstr(protect_buf, "/usr")) {
+    if(!strstr(protect_buf, "/lib") && 
+            !strstr(protect_buf, "/etc") && 
+	    !strstr(protect_buf, "/usr") && 
+	    !strstr(protect_buf, "/dev/urandom")) {
         kill(pid, SIGKILL);
         exit(-1);
     }
-    if( strstr(protect_buf, "flag.txt")) {
+    if( strstr(protect_buf, "flag")) {
         kill(pid, SIGKILL);
         exit(-1);
     }
@@ -240,7 +254,9 @@ void pwn_preprotect(pid_t pid, long syscall) {
             break;
         case SEN_open:
             dump_open(pid, syscall);
+            break;
     } 
+    dump_other(pid, syscall);
 }
 
 

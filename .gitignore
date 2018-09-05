@@ -82,3 +82,4 @@ src/.dirstamp
 Makefile
 
 *.log
+pwn-sandbox
