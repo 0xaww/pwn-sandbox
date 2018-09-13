@@ -33,14 +33,15 @@ int get_filename(char *dst, char *src) {
 int main(int argc, char **argv, char **envp) {
     char buf[256];
     char fname[128];
-    char path[512];
-    sprintf(buf, "%s-orig", argv[0]);
+    char path[128];
+    snprintf(buf, 256, "%s-orig", argv[0]);
     get_filename(fname, argv[0]);
-    sprintf(path, "/tmp/.%s", fname);
+    snprintf(path, 128, "/tmp/.%s", fname);
     mkdir(path, 0777);
+    set_logfile_path(path);
     time_t ts = time(NULL);
-    sprintf(path, "/tmp/.%s/%ld", fname, ts);
-    set_logfile_name(path);
+    snprintf(path, 128, "%ld", ts);
+    set_logfile_prefix(path);
     child = fork();
     if(child == -1){
         exit_error("fork()", errno);

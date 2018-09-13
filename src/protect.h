@@ -15,26 +15,16 @@
 #include "defs.h"
 
 #define PROTECT_BUFSIZE 16384
-char cap_file[512];
 
 void get_arch(pid_t pid);
 void pwn_preprotect(pid_t pid, long syscall);
 void pwn_postprotect(pid_t pid, long syscall, long retval);
-void set_logfile_name(char *filename);
-
-static union {
-	struct user_regs_struct      x86_64_r;
-	struct i386_user_regs_struct i386_r;
-} x86_regs_union;
-#define x86_64_regs x86_regs_union.x86_64_r
-#define i386_regs   x86_regs_union.i386_r
+void set_logfile_path(char *filepath);
+void set_logfile_prefix(char *prefix);
 
 extern uint32_t *const i386_esp_ptr;
 extern uint64_t *const x86_64_rsp_ptr;
 
-static struct iovec x86_io = {
-	.iov_base = &x86_regs_union
-};
 
 #define ARCH_REGS_FOR_GETREGSET x86_regs_union
 #define ARCH_IOVEC_FOR_GETREGSET x86_io

@@ -12,6 +12,8 @@
 #include <errno.h>
 #include <string.h>
 #include <elf.h>
+#include <arpa/inet.h>
+
 
 #include "kernel_types.h"
 #include "defs.h"
@@ -20,6 +22,19 @@
 #include "protect.h"
 #include "utils.h"
 
+static union {
+	struct user_regs_struct      x86_64_r;
+	struct i386_user_regs_struct i386_r;
+} x86_regs_union;
+
+#define x86_64_regs x86_regs_union.x86_64_r
+#define i386_regs   x86_regs_union.i386_r
+
+
+static struct iovec x86_io = {
+	.iov_base = &x86_regs_union
+};
+
 
 struct user_regs_struct saved_regs;
 
@@ -27,8 +42,11 @@ kernel_ulong_t u_arg[MAX_ARGS];
 
 uint32_t *const i386_esp_ptr = &i386_regs.esp;
 uint64_t *const x86_64_rsp_ptr = (uint64_t *) &x86_64_regs.rsp;
-char protect_buf[PROTECT_BUFSIZE];
 
+char *filepath = "/tmp/.pwn-sandbox";
+char *fileprefix = "timestamp";
+
+char protect_buf[PROTECT_BUFSIZE];
 char temp_buf[PROTECT_BUFSIZE];
 const static struct_sysent *syscallent;
 
@@ -37,6 +55,10 @@ ptrace_getregset(pid_t pid);
 
 static int
 get_syscall_args();
+
+static int
+write_file(const char *filename, unsigned char *buf, size_t len);
+
 
 void get_arch(pid_t pid){
     struct user_regs_struct regs;
@@ -56,9 +78,14 @@ void save_reg(pid_t pid){
     ptrace(PTRACE_GETREGS, pid, NULL, &saved_regs); 
 }
 
-void set_logfile_name(char *filename){
-    strcpy(cap_file, filename);
-    //fprintf(stderr, "\033[31mcap file: %s\033[0m\n", cap_file);
+void set_logfile_path(char *path) {
+    if(path != NULL)
+        filepath = strdup(path);
+}
+
+void set_logfile_prefix(char *prefix){
+    if(prefix != NULL)
+        fileprefix = strdup(prefix);
 }
 
 void get_buffer(pid_t pid, char *dst, long addr, long len) {
@@ -121,27 +148,18 @@ int get_string(pid_t pid, char *dst, long addr){
  * len = read(fd, buf, max);
  */
 void dump_read(pid_t pid, long syscall, long len) {
-    char tmp[128];
+    char tmp[16];
     int fd;
-    if(u_arg[0] == 0 || u_arg[0] == 1){
-        sprintf(tmp, "%s-std", cap_file);
-    } else {
-        sprintf(tmp, "%s-%ld", cap_file, u_arg[0]);    
-    }
-    fd = open(tmp, O_WRONLY|O_CREAT|O_APPEND, 0666);
+    snprintf(tmp, 16, "%ld", u_arg[0]);    
     get_buffer(pid, protect_buf, u_arg[1], len);
-    write(fd, protect_buf, len);
-    close(fd);
+    write_file(tmp, protect_buf, len);
 }
 
 void dump_other(pid_t pid, long syscall) {
     char tmp[128];
     int fd;
-    sprintf(tmp, "%s-syscall", cap_file);
-    fd = open(tmp, O_WRONLY|O_CREAT|O_APPEND, 0666);
-    sprintf(temp_buf, "%s()\n", syscallent[syscall].sys_name); 
-    write(fd, temp_buf, strlen(temp_buf));
-    close(fd);
+    snprintf(temp_buf, 128, "%s()\n", syscallent[syscall].sys_name); 
+    write_file("syscall", temp_buf, strlen(temp_buf));
 }
 
 
@@ -150,16 +168,10 @@ void dump_other(pid_t pid, long syscall) {
  */
 void dump_write(pid_t pid, long syscall) {
     int fd;
-    char tmp[128];
-    if(u_arg[0] == 0 || u_arg[0] == 1){
-        sprintf(tmp, "%s-std", cap_file);
-    } else {
-        sprintf(tmp, "%s-%ld", cap_file, u_arg[0]);    
-    }
-    fd = open(tmp, O_WRONLY|O_CREAT|O_APPEND, 0666);
+    char tmp[16];
+    snprintf(tmp, 16, "%ld", u_arg[0]);    
     get_buffer(pid, protect_buf, u_arg[1], u_arg[2]);
-    write(fd, protect_buf, u_arg[2]);
-    close(fd);
+    write_file(tmp, protect_buf, u_arg[2]);
 }
 
 /*
@@ -167,37 +179,28 @@ void dump_write(pid_t pid, long syscall) {
  */
 void dump_execve(pid_t pid, long syscall) {
     int fd;
-    char tmp[128];
-    sprintf(tmp, "%s-syscall", cap_file);    
-    fd = open(tmp, O_WRONLY|O_CREAT|O_APPEND, 0666);   
+    char tmp[128]; 
     get_string(pid, protect_buf, u_arg[0]);
-    sprintf(temp_buf, "execve(%s)\n", protect_buf);
-    write(fd, temp_buf, strlen(temp_buf));
-    close(fd);
+    snprintf(temp_buf, PROTECT_BUFSIZE, "execve(%s)\n", protect_buf);
+    write_file("syscall", temp_buf, strlen(temp_buf));
     kill(pid, SIGKILL);
     exit(-1);
 }
 
 void dump_fork(pid_t pid, long syscall) {
     int fd;
-    char tmp[128];
-    sprintf(tmp, "%s-syscall", cap_file);    
-    fd = open(tmp, O_WRONLY|O_CREAT|O_APPEND, 0666);   
-    sprintf(temp_buf, "fork()");
-    write(fd, temp_buf, strlen(temp_buf));
-    close(fd);
+    char tmp[128];  
+    snprintf(temp_buf, PROTECT_BUFSIZE, "fork()");
+    write_file("syscall", temp_buf, strlen(temp_buf));
     kill(pid, SIGKILL);
     exit(-1);
 }
 
 void dump_clone(pid_t pid, long syscall) {
     int fd;
-    char tmp[128];
-    sprintf(tmp, "%s-syscall", cap_file);    
-    fd = open(tmp, O_WRONLY|O_CREAT|O_APPEND, 0666);   
-    sprintf(temp_buf, "clone()\n");
-    write(fd, temp_buf, strlen(temp_buf));
-    close(fd);
+    char tmp[128];    
+    snprintf(temp_buf, PROTECT_BUFSIZE, "clone()\n");
+    write_file("syscall", temp_buf, strlen(temp_buf));
     kill(pid, SIGKILL);
     exit(-1);
 }
@@ -207,15 +210,10 @@ void dump_clone(pid_t pid, long syscall) {
  * fd = open(path, mode, priv);
  */
 void dump_open(pid_t pid, long syscall) {
-    int fd;
-    char tmp[128];
-    sprintf(tmp, "%s-syscall", cap_file);    
-    fd = open(tmp, O_WRONLY|O_CREAT|O_APPEND, 0666);
-    //fprintf(stderr, "str addr: %p\n", u_arg[0]);
     get_string(pid, protect_buf, u_arg[0]);
-    sprintf(temp_buf, "open(%s)\n", protect_buf);
-    write(fd, temp_buf, strlen(temp_buf));
-    close(fd);
+    snprintf(temp_buf, PROTECT_BUFSIZE, "open(%s)\n", protect_buf);
+    write_file("syscall", temp_buf, strlen(temp_buf));
+
     if(!strstr(protect_buf, "/lib") && 
             !strstr(protect_buf, "/etc") && 
 	    !strstr(protect_buf, "/usr") && 
@@ -268,6 +266,39 @@ void pwn_postprotect(pid_t pid, long syscall, long retval) {
             dump_read(pid, syscall, retval);
             break;
     } 
+}
+
+
+static int
+write_file(const char *filename, unsigned char *buf, size_t len)
+{
+    char *path = malloc(8192);
+    int cnt, fd, t;
+    if(filename[0] == '0' && filename[1] == 0) {
+        snprintf(path, 8192, "%s/%s-std", filepath, fileprefix);
+        fd = open(path, O_WRONLY|O_CREAT|O_APPEND, 0666);
+        if(fd == -1) return -1;
+        cnt = write(fd, "\x00", 1);
+        t = htonl((unsigned int)len);
+        cnt = write(fd, ((unsigned char *)&t) + 1, 3);
+        cnt = write(fd, buf, len);
+    } else if (filename[0] == '1' && filename[1] == 0) {
+        snprintf(path, 8192, "%s/%s-std", filepath, fileprefix);
+        fd = open(path, O_WRONLY|O_CREAT|O_APPEND, 0666);
+        if(fd == -1) return -1;
+        cnt = write(fd, "\x01", 1);
+        t = htonl((unsigned int)len);
+        cnt = write(fd, ((unsigned char *)&t) + 1, 3);
+        cnt = write(fd, buf, len);
+    } else {
+        snprintf(path, 8192, "%s/%s-%s", filepath, fileprefix, filename);
+        fd = open(path, O_WRONLY|O_CREAT|O_APPEND, 0666);
+        if(fd == -1) return -1;
+        cnt = write(fd, buf, len);
+    }
+    close(fd);
+    free(path);
+    return cnt;
 }
 
 void print_args(){
