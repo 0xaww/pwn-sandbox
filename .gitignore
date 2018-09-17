@@ -80,6 +80,7 @@ bin/
 src/.deps/
 src/.dirstamp
 Makefile
+README
 
 *.log
 pwn-sandbox
