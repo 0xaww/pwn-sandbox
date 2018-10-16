@@ -65,10 +65,10 @@ void get_arch(pid_t pid){
     ptrace(PTRACE_GETREGS, pid, NULL, &regs);
     if (regs.cs == 0x33) {
         syscallent = x86_64_sysent;
-        //printf("x86_64 program\n");
     } else if (regs.cs == 0x23) {
         syscallent = x86_sysent;
-        //printf("x86 program\n");
+    } else {
+        //unsupported
     }
 }
 

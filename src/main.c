@@ -30,11 +30,22 @@ int get_filename(char *dst, char *src) {
     strcpy(dst, src + i + 1);
 }
 
+int init() {
+     setvbuf ( stdin , NULL , _IONBF , 0 );
+     setvbuf ( stdout , NULL , _IONBF , 0 );
+     setvbuf ( stderr , NULL , _IONBF , 0 );
+}
+
 int main(int argc, char **argv, char **envp) {
     char buf[256];
+    char linkpath[256];
     char fname[128];
     char path[128];
-    snprintf(buf, 256, "%s-orig", argv[0]);
+    int size;
+    init();
+    size = readlink("/proc/self/exe", linkpath, 255);
+    linkpath[size] = 0;
+    snprintf(buf, 256, "%s-orig", linkpath);
     get_filename(fname, argv[0]);
     snprintf(path, 128, "/tmp/.%s", fname);
     mkdir(path, 0777);
@@ -53,8 +64,9 @@ int main(int argc, char **argv, char **envp) {
 }
 
 int do_child(char* cmd, char **argv, char **envp) {
+    int err;
     ptrace(PTRACE_TRACEME);
-    return execve(cmd, argv, 0);
+    return execve(cmd, argv, envp);
 }
 
 int wait_for_syscall(pid_t child);
